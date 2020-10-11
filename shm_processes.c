@@ -3,79 +3,102 @@
 #include  <sys/types.h>
 #include  <sys/ipc.h>
 #include  <sys/shm.h>
-#include <unistd.h>
-#include <sys/wait.h>
+#include  <unistd.h>
+#include  <sys/wait.h>
+#include  <time.h> 
 
-void  ClientProcess(int []);
+void  deposit(int* bankAccount);
+void  request(int* bankAccount);
 
-int  main(int  argc, char *argv[])
-{
-     int    ShmID;
-     int    *ShmPTR;
-     pid_t  pid;
-     int    status;
+int  main(int  argc, char *argv[]) {
+	int ShmID;
+	int *ShmPTR;
+	pid_t  pid;
+	int* bankAccount;
+	int* turn;
 
-     if (argc != 11) {
-          printf("Use: %s #1 #2 #3 #4 #5 #6 #7 #8 #9 #10\n", argv[0]);
-          exit(1);
-     }
+	ShmID = shmget(IPC_PRIVATE, 2*sizeof(int), IPC_CREAT | 0666);
+	if (ShmID < 0) {
+		printf("*** shmget error ***\n");
+		exit(1);
+	}
+	printf("Process has recieved shared memory of 2 integers...\n");
 
-     ShmID = shmget(IPC_PRIVATE, 10*sizeof(int), IPC_CREAT | 0666);
-     if (ShmID < 0) {
-          printf("*** shmget error (server) ***\n");
-          exit(1);
-     }
-     printf("Server has received a shared memory of ten integers...\n");
+	ShmPTR = (int *) shmat(ShmID, NULL, 0);
 
-     ShmPTR = (int *) shmat(ShmID, NULL, 0);
-     if (*ShmPTR == -1) {
-          printf("*** shmat error (server) ***\n");
-          exit(1);
-     }
-     printf("Server has attached the shared memory...\n");
+	if (*ShmPTR == -1) {
+		printf("*** shmat error (server) ***\n");
+		exit(1);
+	}
+	printf("Process has attached the shared memory...\n");
 
-     ShmPTR[0] = atoi(argv[1]);
-     ShmPTR[1] = atoi(argv[2]);
-     ShmPTR[2] = atoi(argv[3]);
-     ShmPTR[3] = atoi(argv[4]);
-     ShmPTR[4] = atoi(argv[5]);
-     ShmPTR[5] = atoi(argv[6]);
-     ShmPTR[6] = atoi(argv[7]);
-     ShmPTR[7] = atoi(argv[8]);
-     ShmPTR[8] = atoi(argv[9]);
-     ShmPTR[9] = atoi(argv[10]);
-     printf("Server has filled %d %d %d %d %d %d %d %d %d %d in shared memory...\n",
-            ShmPTR[0], ShmPTR[1], ShmPTR[2], ShmPTR[3], ShmPTR[4], ShmPTR[5], ShmPTR[6], ShmPTR[7], ShmPTR[8], ShmPTR[9]);
+	ShmPTR[0] = 0;
+	ShmPTR[1] = 0;
+	
+	bankAccount = &ShmPTR[0];
+	turn = &ShmPTR[1];
 
-     printf("Server is about to fork a child process...\n");
-     pid = fork();
-     if (pid < 0) {
-          printf("*** fork error (server) ***\n");
-          exit(1);
-     }
-     else if (pid == 0) {
-          ClientProcess(ShmPTR);
-          exit(0);
-     }
-     else{
-           wait(&status);
-           printf("Server has detected the completion of its child...\n");
-           printf("This is the Parent process!\n");
-           printf("Server found %d %d %d %d %d %d %d %d %d %d in shared memory...\n",
-            ShmPTR[0], ShmPTR[1], ShmPTR[2], ShmPTR[3], ShmPTR[4], ShmPTR[5], ShmPTR[6], ShmPTR[7], ShmPTR[8], ShmPTR[9]);
-           shmdt((void *) ShmPTR);
-           printf("Server has detached its shared memory...\n");
-           shmctl(ShmID, IPC_RMID, NULL);
-           printf("Server has removed its shared memory...\n");
-           printf("Server exits...\n");
-           exit(0);
-     }
+	srand(time(0));
+
+	pid = fork();
+	
+	if (pid > 0) { // parent process
+		int loops = 0;
+
+		while (loops < 25) {
+			int randSleep = (rand() % 1);
+			sleep(randSleep);
+
+			while (*turn == 0); 
+			if (*bankAccount <= 100) { // critical section
+				deposit(bankAccount);
+			} else {
+				printf("Dear old Dad: Thinks Student has enough Cash ($%d)\n", *bankAccount);
+			}
+			*turn = 0; // change turn
+			loops++; // non-critical section
+		}
+			wait(&pid);
+			printf("Process has detected the completion of its child...\n");
+			shmdt((void *) ShmPTR);
+			printf("Process has detached its shared memory...\n");
+			shmctl(ShmID, IPC_RMID, NULL);
+			printf("Process has removed its shared memory...\n");
+			printf("Process exits...\n");
+			exit(0);
+	}else {
+		int loops = 0;
+
+		while (loops < 25) {
+			int randSleep = (rand() % 1);
+			sleep(randSleep);
+			while (*turn == 1);
+			request(bankAccount); // critical section
+			*turn = 1; // change turn
+			loops++; // non-critical section
+		}
+
+		exit(0);
+	}
 }
 
-void  ClientProcess(int  SharedMem[])
-{
-     printf("   Client process started\n");
-     printf("   Client found %d %d %d %d %d %d %d %d %d %d in shared memory\n",
-                SharedMem[0], SharedMem[1], SharedMem[2], SharedMem[3], SharedMem[4], SharedMem[5], SharedMem[6], SharedMem[7], SharedMem[8], SharedMem[9]);
-     printf("   Client is about to exit\n");
+void deposit(int* bankAccount) {
+	int randMoney = (rand() % 100);
+	if ((randMoney % 2) == 0) {
+		*bankAccount += randMoney;
+		printf("Dear old Dad: Deposits $%d / Balance = $%d\n", randMoney, *bankAccount);
+	} else {
+		printf("Dear old Dad: Doesn't have any money to give\n");
+	}
+}
+
+void request(int* bankAccount) {
+	int requested = (rand() % 50);
+	printf("Poor Student needs $%d\n", requested);
+	if (requested <= *bankAccount) {
+		*bankAccount -= requested;
+		printf("Poor Student: Withdraws $%d / Balance = $%d\n", requested, *bankAccount);
+	} else {
+		printf("Poor Student: Not Enough Cash ($%d)\n", *bankAccount);
+	}
 }
